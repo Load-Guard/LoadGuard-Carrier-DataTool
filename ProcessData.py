@@ -54,7 +54,7 @@ ascii_art = RED + r"""
 ╚██████╗███████╗██║       ██║   ╚██████╔╝╚██████╔╝███████╗
  ╚═════╝╚══════╝╚═╝       ╚═╝    ╚═════╝  ╚═════╝ ╚══════╝
 """
-#hello
+
 # Main Menu Code.
 def main_menu():
     print(ascii_art)  # Display ASCII art

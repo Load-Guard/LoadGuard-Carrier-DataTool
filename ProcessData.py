@@ -219,8 +219,8 @@ def split_processed_files(input_directory, lines_per_file):
 
             logging.info(f"File {base_file_name} split into {part_number - 1} parts.")
 
-def map_dot_to_inspection_id(dot_numbers, archive_directory):
-    inspection_map = defaultdict(list)
+def map_dot_to_inspection_data(dot_numbers, archive_directory):
+    inspection_data_map = defaultdict(lambda: defaultdict(int))
     console = Console()
     total_archives = len(glob.glob(os.path.join(archive_directory, '*.zip')))
 
@@ -229,7 +229,7 @@ def map_dot_to_inspection_id(dot_numbers, archive_directory):
                   TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
-        task = progress.add_task("Mapping DOT to Inspection IDs", total=total_archives)
+        task = progress.add_task("Mapping DOT to Inspection Data", total=total_archives)
 
         for archive in glob.glob(os.path.join(archive_directory, '*.zip')):
             with zipfile.ZipFile(archive, 'r') as zip_ref:
@@ -245,14 +245,24 @@ def map_dot_to_inspection_id(dot_numbers, archive_directory):
                                     for row in reader:
                                         dot_number = row.get('DOT_NUMBER')
                                         if dot_number in dot_numbers:
-                                            inspection_map[dot_number].append(row.get('INSPECTION_ID'))
+                                            # Count the occurrences
+                                            inspection_data_map[dot_number]['VIOL_TOTAL'] += int(row.get('VIOL_TOTAL', 0))
+                                            inspection_data_map[dot_number]['OOS_TOTAL'] += int(row.get('OOS_TOTAL', 0))
+                                            inspection_data_map[dot_number]['DRIVER_VIOL_TOTAL'] += int(row.get('DRIVER_VIOL_TOTAL', 0))
+                                            inspection_data_map[dot_number]['DRIVER_OOS_TOTAL'] += int(row.get('DRIVER_OOS_TOTAL', 0))
+                                            inspection_data_map[dot_number]['VEHICLE_VIOL_TOTAL'] += int(row.get('VEHICLE_VIOL_TOTAL', 0))
+                                            inspection_data_map[dot_number]['VEHICLE_OOS_TOTAL'] += int(row.get('VEHICLE_OOS_TOTAL', 0))
+                                            inspection_data_map[dot_number]['HAZMAT_VIOL_TOTAL'] += int(row.get('HAZMAT_VIOL_TOTAL', 0))
+                                            inspection_data_map[dot_number]['HAZMAT_OOS_TOTAL'] += int(row.get('HAZMAT_OOS_TOTAL', 0))
+
                                 break  # Break the loop if file processed successfully
                             except UnicodeDecodeError:
                                 continue  # Try next encoding
 
                 progress.update(task, advance=1)  # Update progress after each archive
 
-    return inspection_map
+    return inspection_data_map
+
 
 def extract_dot_numbers_from_processed(processed_directory):
     dot_numbers = set()
@@ -264,7 +274,7 @@ def extract_dot_numbers_from_processed(processed_directory):
                     dot_numbers.add(row['DOT_NUMBER'])
     return dot_numbers
 
-def add_inspection_id_to_census(census_directory, inspection_map):
+def add_inspection_data_to_census(census_directory, inspection_data_map):
     console = Console()
     total_files = len(glob.glob(os.path.join(census_directory, '*.csv')))
 
@@ -273,17 +283,26 @@ def add_inspection_id_to_census(census_directory, inspection_map):
                   TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
-        task = progress.add_task("Adding Inspection IDs to Census", total=total_files)
+        task = progress.add_task("Adding Inspection Data to Census", total=total_files)
 
         for filename in glob.glob(os.path.join(census_directory, '*.csv')):
             new_rows = []
             with open(filename, 'r', encoding='utf-8') as infile:
                 reader = csv.DictReader(infile)
-                fieldnames = reader.fieldnames + ['INSPECTION_ID']
+                fieldnames = reader.fieldnames + ['VIOL_TOTAL_COUNT', 'OOS_TOTAL_COUNT', 'DRIVER_VIOL_TOTAL_COUNT', 'DRIVER_OOS_TOTAL_COUNT', 'VEHICLE_VIOL_TOTAL_COUNT', 'VEHICLE_OOS_TOTAL_COUNT', 'HAZMAT_VIOL_TOTAL_COUNT', 'HAZMAT_OOS_TOTAL_COUNT']
                 for row in reader:
                     dot_number = row.get('DOT_NUMBER')
-                    inspection_ids = ','.join(inspection_map.get(dot_number, []))
-                    row['INSPECTION_ID'] = inspection_ids
+                    inspection_counts = inspection_data_map.get(dot_number, {})
+                    row.update({
+                        'VIOL_TOTAL_COUNT': inspection_counts.get('VIOL_TOTAL', 0),
+                        'OOS_TOTAL_COUNT': inspection_counts.get('OOS_TOTAL', 0),
+                        'DRIVER_VIOL_TOTAL_COUNT': inspection_counts.get('DRIVER_VIOL_TOTAL', 0),
+                        'DRIVER_OOS_TOTAL_COUNT': inspection_counts.get('DRIVER_OOS_TOTAL', 0),
+                        'VEHICLE_VIOL_TOTAL_COUNT': inspection_counts.get('VEHICLE_VIOL_TOTAL', 0),
+                        'VEHICLE_OOS_TOTAL_COUNT': inspection_counts.get('VEHICLE_OOS_TOTAL', 0),
+                        'HAZMAT_VIOL_TOTAL_COUNT': inspection_counts.get('HAZMAT_VIOL_TOTAL', 0),
+                        'HAZMAT_OOS_TOTAL_COUNT': inspection_counts.get('HAZMAT_OOS_TOTAL', 0)
+                    })
                     new_rows.append(row)
             
             with open(filename, 'w', newline='', encoding='utf-8') as outfile:
@@ -295,6 +314,7 @@ def add_inspection_id_to_census(census_directory, inspection_map):
             progress.update(task, advance=1)  # Update progress after each file
 
     return True  # Indicates successful completion
+
 
 def count_rows_in_directory(directory):
     total_rows = 0
@@ -576,10 +596,10 @@ def main():
             logging.info(f"DOT Numbers Saved To {dot_numbers_file}")
 
             # Process inspection archives and map DOT numbers to inspection IDs
-            inspection_map = map_dot_to_inspection_id(all_dot_numbers, '.')
+            inspection_map = map_dot_to_inspection_data(all_dot_numbers, '.')
 
             # Add INSPECTION_ID to the processed carrier files
-            add_inspection_id_to_census(processed_files_dir, inspection_map)
+            add_inspection_data_to_census(processed_files_dir, inspection_map)
 
             # Split the updated files
             split_processed_files(processed_files_dir, 15000)

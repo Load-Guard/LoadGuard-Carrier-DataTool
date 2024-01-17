@@ -5,7 +5,7 @@
 
 Place Census and Inspection Archive or Extracted Inspection files in the same directory as the script.
 
-﻿# LoadGuard-Carrier-DataTool
+﻿LoadGuard-Carrier-DataTool
 This script is a command-line tool that performs various operations on CSV files related to carrier census and inspection data. Let's go through the main function `main()`:
 
 1. `answers = main_menu()`: This line calls the `main_menu()` function, which displays an ASCII art and a navigation guide. It then prompts the user to select one or more operations to perform from a list of options using the `inquirer` library. The selected options are stored in the `answers` variable.

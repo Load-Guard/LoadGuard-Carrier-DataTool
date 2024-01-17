@@ -114,7 +114,7 @@ def process_csv(file_path):
     output_folder = 'Processed Files'
     os.makedirs(output_folder, exist_ok=True)
     dot_numbers = set()
-    skipped_rows_count = 0
+    processed_rows = 0  # Counter for the number of processed (non-empty) rows
     console = Console()
 
     file_processed = False
@@ -127,11 +127,11 @@ def process_csv(file_path):
                 reader = csv.DictReader(infile, delimiter='~')
 
                 with Progress(
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    SpinnerColumn(),
-                    console=console,
+                        TextColumn("[progress.description]{task.description}"),
+                        BarColumn(),
+                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                        SpinnerColumn(),
+                        console=console,
                 ) as progress:
                     task = progress.add_task("Processing...", total=total_rows)
 
@@ -143,24 +143,21 @@ def process_csv(file_path):
                     for row in reader:
                         cleaned_row = clean_row(row)
 
-                        if not any(cleaned_row.values()) or not cleaned_row.get('ICC1'):
-                            skipped_rows_count += 1
-                            progress.update(task, advance=1)
-                            continue
+                        # Ensure the row isn't empty after cleaning
+                        if any(cleaned_row.values()):
+                            # Collect DOT numbers after cleaning and validation
+                            if 'DOT_NUMBER' in cleaned_row:
+                                dot_numbers.add(cleaned_row['DOT_NUMBER'])
 
-                        # Collect DOT numbers after cleaning and validation
-                        if 'DOT_NUMBER' in cleaned_row:
-                            dot_numbers.add(cleaned_row['DOT_NUMBER'])
+                            writer.writerow({k: cleaned_row.get(k, '') for k in columns_to_keep})
+                            processed_rows += 1  # Increment the processed row count
 
-                        writer.writerow({k: cleaned_row.get(k, '') for k in columns_to_keep})
                         progress.update(task, advance=1)
 
                     outfile.close()
-                logging.info(f"Completed processing {file_path}. Processed rows: {total_rows}, Skipped rows: {skipped_rows_count}, Unique DOT numbers found: {len(dot_numbers)}")
+                logging.info(f"Completed processing {file_path}. Processed rows: {processed_rows}, Unique DOT numbers found: {len(dot_numbers)}")
                 file_processed = True
                 progress.update(task, completed=total_rows)
-                if skipped_rows_count > 0:
-                    logging.info(f"Skipped {skipped_rows_count} rows due to empty or missing ICC1 in file {file_path}")
                 logging.info(f"File {base_file_name} processed and saved.")
                 break
         except UnicodeDecodeError as e:
@@ -170,7 +167,6 @@ def process_csv(file_path):
 
     if not file_processed:
         logging.error(last_error)
-        logging.error(f"Failed to process file {file_path} with any of the tried encodings.")
         return set()
 
     return dot_numbers
@@ -300,6 +296,15 @@ def add_inspection_id_to_census(census_directory, inspection_map):
 
     return True  # Indicates successful completion
 
+def count_rows_in_directory(directory):
+    total_rows = 0
+    for filename in glob.glob(os.path.join(directory, '*.csv')):
+        with open(filename, 'r', encoding='utf-8') as file:
+            reader = csv.reader(file)
+            row_count = sum(1 for row in reader) - 1  # Subtract 1 for the header
+            total_rows += row_count
+    return total_rows
+
 # Extract Dot Numbers From Carrier Files.
 def extract_dot_numbers(output_folder):
     # Combine dot numbers from all files
@@ -410,14 +415,12 @@ def call_data_merger():
         while not completed:
             response = requests.get(f"{url}?start={startIndex}")
             
-            # Check if the response is successful and is in JSON format
             try:
                 response_json = response.json()
             except json.JSONDecodeError:
                 logging.error(f"Invalid JSON response. Status Code: {response.status_code}, Response: {response.text}")
                 break
 
-            # Update the progress and other variables
             startIndex = response_json.get('nextStartIndex', startIndex)
             totalFiles = response_json.get('totalFiles', totalFiles)
             completed = response_json.get('completed', False)
@@ -581,8 +584,13 @@ def main():
             # Split the updated files
             split_processed_files(processed_files_dir, 15000)
 
+            # Count all rows in the Split and Ready files
+            final_row_count = count_rows_in_directory('Split and Ready Files')
+            logging.info(f"Total rows across all Split and Ready files: {final_row_count}")
+
         else:
             logging.info("No CSV Files Found.")
+
 
     if 'Upload Filtered And Split Carrier Files To FTP' in answers['operations']:
         carrier_files_dir = 'Split and Ready Files'

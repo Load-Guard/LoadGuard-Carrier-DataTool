@@ -1,4 +1,4 @@
-# ![image](https://github.com/Load-Guard/LoadGuard-Carrier-DataTool/assets/89620787/1949e11a-7c6c-433d-a503-557110a2142f)
+<center>![image](https://github.com/Load-Guard/LoadGuard-Carrier-DataTool/assets/89620787/1949e11a-7c6c-433d-a503-557110a2142f)</center>
 
 Place Census and Inspection Archive or Extracted Inspection files in the same directory as the script.
 

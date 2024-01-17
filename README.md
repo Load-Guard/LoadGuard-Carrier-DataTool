@@ -1,3 +1,6 @@
+![image](https://github.com/Load-Guard/LoadGuard-Carrier-DataTool/assets/89620787/1949e11a-7c6c-433d-a503-557110a2142f)
+Place Census and Inspection Archive or Extracted Inspection files in the same directory as the script.
+
 ﻿# LoadGuard-Carrier-DataTool
 This script is a command-line tool that performs various operations on CSV files related to carrier census and inspection data. Let's go through the main function `main()`:
 

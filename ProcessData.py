@@ -220,7 +220,15 @@ def split_processed_files(input_directory, lines_per_file):
             logging.info(f"File {base_file_name} split into {part_number - 1} parts.")
 
 def map_dot_to_inspection_data(dot_numbers, archive_directory):
-    inspection_data_map = defaultdict(lambda: defaultdict(int))
+    inspection_data_map = defaultdict(lambda: {
+        'insp_ids': [],
+        'veh_insp_count': 0,
+        'drv_insp_count': 0,
+        'hzmt_insp_count': 0,
+        'veh_insp_oos': 0,
+        'drv_insp_oos': 0,
+        'hzmt_insp_oos': 0
+    })
     console = Console()
     total_archives = len(glob.glob(os.path.join(archive_directory, '*.zip')))
 
@@ -245,21 +253,39 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
                                     for row in reader:
                                         dot_number = row.get('DOT_NUMBER')
                                         if dot_number in dot_numbers:
-                                            # Count the occurrences
-                                            inspection_data_map[dot_number]['VIOL_TOTAL'] += int(row.get('VIOL_TOTAL', 0))
-                                            inspection_data_map[dot_number]['OOS_TOTAL'] += int(row.get('OOS_TOTAL', 0))
-                                            inspection_data_map[dot_number]['DRIVER_VIOL_TOTAL'] += int(row.get('DRIVER_VIOL_TOTAL', 0))
-                                            inspection_data_map[dot_number]['DRIVER_OOS_TOTAL'] += int(row.get('DRIVER_OOS_TOTAL', 0))
-                                            inspection_data_map[dot_number]['VEHICLE_VIOL_TOTAL'] += int(row.get('VEHICLE_VIOL_TOTAL', 0))
-                                            inspection_data_map[dot_number]['VEHICLE_OOS_TOTAL'] += int(row.get('VEHICLE_OOS_TOTAL', 0))
-                                            inspection_data_map[dot_number]['HAZMAT_VIOL_TOTAL'] += int(row.get('HAZMAT_VIOL_TOTAL', 0))
-                                            inspection_data_map[dot_number]['HAZMAT_OOS_TOTAL'] += int(row.get('HAZMAT_OOS_TOTAL', 0))
+                                            in_data = inspection_data_map[dot_number]
+                                            in_data['insp_ids'].append(row.get('INSPECTION_ID'))
+
+                                            # Determine inspection type and OOS status
+                                            inspection_level = row.get('INSP_LEVEL_ID')
+                                            is_oos_veh = int(row.get('VEHICLE_OOS_TOTAL', '0')) > 0
+                                            is_oos_drv = int(row.get('DRIVER_OOS_TOTAL', '0')) > 0
+                                            is_oos_hzmt = int(row.get('HAZMAT_OOS_TOTAL', '0')) > 0
+
+                                            # Count inspections and increment OOS if any violation is present
+                                            if inspection_level in ['1', '2', '5', '6']:
+                                                in_data['veh_insp_count'] += 1
+                                                in_data['veh_insp_oos'] += int(is_oos_veh)
+
+                                            if inspection_level in ['1', '2', '3', '6']:
+                                                in_data['drv_insp_count'] += 1
+                                                in_data['drv_insp_oos'] += int(is_oos_drv)
+
+                                            if inspection_level in ['1', '2', '3', '4', '5', '6'] and 'Y' in row.get('HAZMAT_PLACARD_REQ', 'N'):
+                                                in_data['hzmt_insp_count'] += 1
+                                                in_data['hzmt_insp_oos'] += int(is_oos_hzmt)
 
                                 break  # Break the loop if file processed successfully
                             except UnicodeDecodeError:
                                 continue  # Try next encoding
 
                 progress.update(task, advance=1)  # Update progress after each archive
+
+    # Calculate OOS percentages
+    for dot_number, data in inspection_data_map.items():
+        data['veh_oos_prcnt'] = (data['veh_insp_oos'] / data['veh_insp_count'] * 100) if data['veh_insp_count'] else 0
+        data['drv_oos_prcnt'] = (data['drv_insp_oos'] / data['drv_insp_count'] * 100) if data['drv_insp_count'] else 0
+        data['hzmt_oos_prcnt'] = (data['hzmt_insp_oos'] / data['hzmt_insp_count'] * 100) if data['hzmt_insp_count'] else 0
 
     return inspection_data_map
 
@@ -273,6 +299,13 @@ def extract_dot_numbers_from_processed(processed_directory):
                 if 'DOT_NUMBER' in row and row['DOT_NUMBER']:
                     dot_numbers.add(row['DOT_NUMBER'])
     return dot_numbers
+
+def format_percentage(value):
+    """Formats the percentage value to remove decimal places if it's a whole number, 
+    or show up to two decimal places if less than 1%."""
+    if value < 1:
+        return round(value, 2)  # Show up to two decimal places for small percentages
+    return int(value) if value == int(value) else round(value, 2)
 
 def add_inspection_data_to_census(census_directory, inspection_data_map):
     console = Console()
@@ -289,19 +322,21 @@ def add_inspection_data_to_census(census_directory, inspection_data_map):
             new_rows = []
             with open(filename, 'r', encoding='utf-8') as infile:
                 reader = csv.DictReader(infile)
-                fieldnames = reader.fieldnames + ['VIOL_TOTAL_COUNT', 'OOS_TOTAL_COUNT', 'DRIVER_VIOL_TOTAL_COUNT', 'DRIVER_OOS_TOTAL_COUNT', 'VEHICLE_VIOL_TOTAL_COUNT', 'VEHICLE_OOS_TOTAL_COUNT', 'HAZMAT_VIOL_TOTAL_COUNT', 'HAZMAT_OOS_TOTAL_COUNT']
+                fieldnames = reader.fieldnames + ['INSPECTION_IDS', 'VEH_INSP_COUNT', 'DRV_INSP_COUNT', 'HZMT_INSP_COUNT', 'VEH_INSP_OOS', 'DRV_INSP_OOS', 'HAZMT_INSP_OOS', 'VEH_OOS_PRCNT', 'DRV_OOS_PRCNT', 'HAZMT_OOS_PRCNT']
                 for row in reader:
                     dot_number = row.get('DOT_NUMBER')
-                    inspection_counts = inspection_data_map.get(dot_number, {})
+                    inspection_data = inspection_data_map.get(dot_number, {})
                     row.update({
-                        'VIOL_TOTAL_COUNT': inspection_counts.get('VIOL_TOTAL', 0),
-                        'OOS_TOTAL_COUNT': inspection_counts.get('OOS_TOTAL', 0),
-                        'DRIVER_VIOL_TOTAL_COUNT': inspection_counts.get('DRIVER_VIOL_TOTAL', 0),
-                        'DRIVER_OOS_TOTAL_COUNT': inspection_counts.get('DRIVER_OOS_TOTAL', 0),
-                        'VEHICLE_VIOL_TOTAL_COUNT': inspection_counts.get('VEHICLE_VIOL_TOTAL', 0),
-                        'VEHICLE_OOS_TOTAL_COUNT': inspection_counts.get('VEHICLE_OOS_TOTAL', 0),
-                        'HAZMAT_VIOL_TOTAL_COUNT': inspection_counts.get('HAZMAT_VIOL_TOTAL', 0),
-                        'HAZMAT_OOS_TOTAL_COUNT': inspection_counts.get('HAZMAT_OOS_TOTAL', 0)
+                        'INSPECTION_IDS': ','.join(inspection_data.get('insp_ids', [])),
+                        'VEH_INSP_COUNT': inspection_data.get('veh_insp_count', 0),
+                        'DRV_INSP_COUNT': inspection_data.get('drv_insp_count', 0),
+                        'HZMT_INSP_COUNT': inspection_data.get('hzmt_insp_count', 0),
+                        'VEH_INSP_OOS': inspection_data.get('veh_insp_oos', 0),
+                        'DRV_INSP_OOS': inspection_data.get('drv_insp_oos', 0),
+                        'HAZMT_INSP_OOS': inspection_data.get('hzmt_insp_oos', 0),
+                        'VEH_OOS_PRCNT': format_percentage(inspection_data.get('veh_oos_prcnt', 0)),
+                        'DRV_OOS_PRCNT': format_percentage(inspection_data.get('drv_oos_prcnt', 0)),
+                        'HAZMT_OOS_PRCNT': format_percentage(inspection_data.get('hzmt_oos_prcnt', 0))
                     })
                     new_rows.append(row)
             

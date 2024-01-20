@@ -66,4 +66,12 @@ This script is a command-line tool that performs various operations on CSV files
 
 29. `logging.info("Exiting the program.")`: This line logs a message indicating that the program is exiting.
 
+Counting Each Inspection Type: For each DOT number, the script counts the number of inspections for each type (vehicle, driver, hazmat). This count is incremented by 1 for each relevant inspection found in the inspection data.
+
+Counting Out-Of-Service (OOS) Inspections: The script also counts the number of inspections where there is at least one OOS violation for each type. This means that if an inspection has any OOS violations (greater than 0), it is counted as one OOS inspection for that type. The total number of OOS inspections for each type is not the sum of all OOS violations but the count of inspections where OOS violations occurred.
+
+For example, if there are 10 inspections and 5 of them have any number of OOS violations (regardless of the actual number of violations in each of those inspections), then the OOS count for that type is 5, not the sum of the number of violations in those 5 inspections.
+
+This logic ensures that each inspection contributes only once to the OOS count for its type, regardless of the number of OOS violations it contains. The same applies to the total inspection count for each type. This method provides a clearer picture of how many inspections resulted in OOS findings, rather than the total number of violations, which could be skewed by a few inspections with multiple violations.
+
 Overall, this script provides a menu-driven interface to perform various operations on carrier census and inspection data, including processing CSV files, splitting files, uploading files to an FTP server, merging data with a database, and comparing DOT numbers between carrier and inspection files.

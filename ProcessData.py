@@ -2,22 +2,16 @@ import csv
 import json
 import glob
 import os
-import sys
 import zipfile
 import logging
-from concurrent.futures import ProcessPoolExecutor
 from ftplib import FTP
 import requests
 import inquirer
-from tqdm import tqdm
 from rich.progress import (
     Progress,
     BarColumn,
     TextColumn,
-    TimeRemainingColumn,
-    TransferSpeedColumn,
     SpinnerColumn,
-    TotalFileSizeColumn,
 )
 from rich.console import Console
 from collections import defaultdict

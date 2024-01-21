@@ -254,7 +254,23 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
                                             else:
                                                 in_data['insp_ids'].add(insp_id)
 
-                                            # ... Rest of your code for counting inspections ...
+                                                # Count inspections and increment OOS if any violation is present
+                                                inspection_level = row.get('INSP_LEVEL_ID')
+                                                is_oos_veh = int(row.get('VEHICLE_OOS_TOTAL', '0')) > 0
+                                                is_oos_drv = int(row.get('DRIVER_OOS_TOTAL', '0')) > 0
+                                                is_oos_hzmt = int(row.get('HAZMAT_OOS_TOTAL', '0')) > 0
+
+                                                if inspection_level in ['1', '2', '5', '6']:
+                                                    in_data['veh_insp_count'] += 1
+                                                    in_data['veh_insp_oos'] += int(is_oos_veh)
+
+                                                if inspection_level in ['1', '2', '3', '6']:
+                                                    in_data['drv_insp_count'] += 1
+                                                    in_data['drv_insp_oos'] += int(is_oos_drv)
+
+                                                if inspection_level in ['1', '2', '3', '4', '5', '6'] and 'Y' in row.get('HAZMAT_PLACARD_REQ', 'N'):
+                                                    in_data['hzmt_insp_count'] += 1
+                                                    in_data['hzmt_insp_oos'] += int(is_oos_hzmt)
 
                                 break
                             except UnicodeDecodeError:
@@ -262,13 +278,11 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
 
                 progress.update(task, advance=1)
 
-    # Calculate OOS percentages and log duplicates (if any)
+    # Calculate OOS percentages
     for dot_number, data in inspection_data_map.items():
         data['veh_oos_prcnt'] = (data['veh_insp_oos'] / data['veh_insp_count'] * 100) if data['veh_insp_count'] else 0
         data['drv_oos_prcnt'] = (data['drv_insp_oos'] / data['drv_insp_count'] * 100) if data['drv_insp_count'] else 0
         data['hzmt_oos_prcnt'] = (data['hzmt_insp_oos'] / data['hzmt_insp_count'] * 100) if data['hzmt_insp_count'] else 0
-        if data['duplicate_insp_ids']:
-            print(f"Duplicate inspection IDs found for DOT {dot_number}: {data['duplicate_insp_ids']}")
 
     return inspection_data_map
 

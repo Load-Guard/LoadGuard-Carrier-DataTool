@@ -313,6 +313,7 @@ def add_inspection_data_to_census(census_directory, inspection_data_map):
 
     with Progress(TextColumn("[progress.description]{task.description}"),
                   BarColumn(),
+                  TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
         task = progress.add_task("Adding Inspection Data to Census", total=total_files)

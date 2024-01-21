@@ -221,7 +221,7 @@ def split_processed_files(input_directory, lines_per_file):
 
 def map_dot_to_inspection_data(dot_numbers, archive_directory):
     inspection_data_map = defaultdict(lambda: {
-        'insp_ids': [],
+        'insp_ids': set(),  # Using a set to prevent duplicates
         'veh_insp_count': 0,
         'drv_insp_count': 0,
         'hzmt_insp_count': 0,
@@ -254,7 +254,7 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
                                         dot_number = row.get('DOT_NUMBER')
                                         if dot_number in dot_numbers:
                                             in_data = inspection_data_map[dot_number]
-                                            in_data['insp_ids'].append(row.get('INSPECTION_ID'))
+                                            in_data['insp_ids'].add(row.get('INSPECTION_ID'))
 
                                             # Determine inspection type and OOS status
                                             inspection_level = row.get('INSP_LEVEL_ID')
@@ -313,7 +313,6 @@ def add_inspection_data_to_census(census_directory, inspection_data_map):
 
     with Progress(TextColumn("[progress.description]{task.description}"),
                   BarColumn(),
-                  TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
         task = progress.add_task("Adding Inspection Data to Census", total=total_files)
@@ -325,18 +324,29 @@ def add_inspection_data_to_census(census_directory, inspection_data_map):
                 fieldnames = reader.fieldnames + ['INSPECTION_IDS', 'VEH_INSP_COUNT', 'DRV_INSP_COUNT', 'HZMT_INSP_COUNT', 'VEH_INSP_OOS', 'DRV_INSP_OOS', 'HAZMT_INSP_OOS', 'VEH_OOS_PRCNT', 'DRV_OOS_PRCNT', 'HAZMT_OOS_PRCNT']
                 for row in reader:
                     dot_number = row.get('DOT_NUMBER')
-                    inspection_data = inspection_data_map.get(dot_number, {})
+                    inspection_data = inspection_data_map.get(dot_number, {
+                        'insp_ids': set(),
+                        'veh_insp_count': 0,
+                        'drv_insp_count': 0,
+                        'hzmt_insp_count': 0,
+                        'veh_insp_oos': 0,
+                        'drv_insp_oos': 0,
+                        'hzmt_insp_oos': 0,
+                        'veh_oos_prcnt': 0,
+                        'drv_oos_prcnt': 0,
+                        'hzmt_oos_prcnt': 0
+                    })
                     row.update({
-                        'INSPECTION_IDS': ','.join(inspection_data.get('insp_ids', [])),
-                        'VEH_INSP_COUNT': inspection_data.get('veh_insp_count', 0),
-                        'DRV_INSP_COUNT': inspection_data.get('drv_insp_count', 0),
-                        'HZMT_INSP_COUNT': inspection_data.get('hzmt_insp_count', 0),
-                        'VEH_INSP_OOS': inspection_data.get('veh_insp_oos', 0),
-                        'DRV_INSP_OOS': inspection_data.get('drv_insp_oos', 0),
-                        'HAZMT_INSP_OOS': inspection_data.get('hzmt_insp_oos', 0),
-                        'VEH_OOS_PRCNT': format_percentage(inspection_data.get('veh_oos_prcnt', 0)),
-                        'DRV_OOS_PRCNT': format_percentage(inspection_data.get('drv_oos_prcnt', 0)),
-                        'HAZMT_OOS_PRCNT': format_percentage(inspection_data.get('hzmt_oos_prcnt', 0))
+                        'INSPECTION_IDS': ','.join(inspection_data['insp_ids']),
+                        'VEH_INSP_COUNT': inspection_data['veh_insp_count'],
+                        'DRV_INSP_COUNT': inspection_data['drv_insp_count'],
+                        'HZMT_INSP_COUNT': inspection_data['hzmt_insp_count'],
+                        'VEH_INSP_OOS': inspection_data['veh_insp_oos'],
+                        'DRV_INSP_OOS': inspection_data['drv_insp_oos'],
+                        'HAZMT_INSP_OOS': inspection_data['hzmt_insp_oos'],
+                        'VEH_OOS_PRCNT': format_percentage(inspection_data['veh_oos_prcnt']),
+                        'DRV_OOS_PRCNT': format_percentage(inspection_data['drv_oos_prcnt']),
+                        'HAZMT_OOS_PRCNT': format_percentage(inspection_data['hzmt_oos_prcnt'])
                     })
                     new_rows.append(row)
             
@@ -349,7 +359,6 @@ def add_inspection_data_to_census(census_directory, inspection_data_map):
             progress.update(task, advance=1)  # Update progress after each file
 
     return True  # Indicates successful completion
-
 
 def count_rows_in_directory(directory):
     total_rows = 0

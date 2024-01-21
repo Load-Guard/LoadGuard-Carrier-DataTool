@@ -229,6 +229,7 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
 
     with Progress(TextColumn("[progress.description]{task.description}"),
                   BarColumn(),
+                  TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
         task = progress.add_task("Mapping DOT to Inspection Data", total=total_archives)
@@ -298,11 +299,8 @@ def extract_dot_numbers_from_processed(processed_directory):
     return dot_numbers
 
 def format_percentage(value):
-    """Formats the percentage value to remove decimal places if it's a whole number, 
-    or show up to two decimal places if less than 1%."""
-    if value < 1:
-        return round(value, 2)  # Show up to two decimal places for small percentages
-    return int(value) if value == int(value) else round(value, 2)
+    """Formats the percentage value to the nearest whole number without decimals."""
+    return round(value)
 
 def add_inspection_data_to_census(census_directory, inspection_data_map):
     console = Console()

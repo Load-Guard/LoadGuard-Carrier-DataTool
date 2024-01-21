@@ -5,6 +5,10 @@
 
 Place Census and Inspection Archive or Extracted Inspection files in the same directory as the script.
 
+Install Dependencies by running
+
+$ pip install -r requirements.txt
+
 ﻿LoadGuard-Carrier-DataTool
 This script is a command-line tool that performs various operations on CSV files related to carrier census and inspection data. Let's go through the main function `main()`:
 

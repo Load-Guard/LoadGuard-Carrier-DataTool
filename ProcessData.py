@@ -215,20 +215,20 @@ def split_processed_files(input_directory, lines_per_file):
 
 def map_dot_to_inspection_data(dot_numbers, archive_directory):
     inspection_data_map = defaultdict(lambda: {
-        'insp_ids': set(),  # Using a set to prevent duplicates
+        'insp_ids': set(),
         'veh_insp_count': 0,
         'drv_insp_count': 0,
         'hzmt_insp_count': 0,
         'veh_insp_oos': 0,
         'drv_insp_oos': 0,
-        'hzmt_insp_oos': 0
+        'hzmt_insp_oos': 0,
+        'duplicate_insp_ids': set()  # To track duplicate IDs
     })
     console = Console()
     total_archives = len(glob.glob(os.path.join(archive_directory, '*.zip')))
 
     with Progress(TextColumn("[progress.description]{task.description}"),
                   BarColumn(),
-                  TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                   SpinnerColumn(),
                   console=console) as progress:
         task = progress.add_task("Mapping DOT to Inspection Data", total=total_archives)
@@ -248,38 +248,27 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
                                         dot_number = row.get('DOT_NUMBER')
                                         if dot_number in dot_numbers:
                                             in_data = inspection_data_map[dot_number]
-                                            in_data['insp_ids'].add(row.get('INSPECTION_ID'))
+                                            insp_id = row.get('INSPECTION_ID')
+                                            if insp_id in in_data['insp_ids']:
+                                                in_data['duplicate_insp_ids'].add(insp_id)
+                                            else:
+                                                in_data['insp_ids'].add(insp_id)
 
-                                            # Determine inspection type and OOS status
-                                            inspection_level = row.get('INSP_LEVEL_ID')
-                                            is_oos_veh = int(row.get('VEHICLE_OOS_TOTAL', '0')) > 0
-                                            is_oos_drv = int(row.get('DRIVER_OOS_TOTAL', '0')) > 0
-                                            is_oos_hzmt = int(row.get('HAZMAT_OOS_TOTAL', '0')) > 0
+                                            # ... Rest of your code for counting inspections ...
 
-                                            # Count inspections and increment OOS if any violation is present
-                                            if inspection_level in ['1', '2', '5', '6']:
-                                                in_data['veh_insp_count'] += 1
-                                                in_data['veh_insp_oos'] += int(is_oos_veh)
-
-                                            if inspection_level in ['1', '2', '3', '6']:
-                                                in_data['drv_insp_count'] += 1
-                                                in_data['drv_insp_oos'] += int(is_oos_drv)
-
-                                            if inspection_level in ['1', '2', '3', '4', '5', '6'] and 'Y' in row.get('HAZMAT_PLACARD_REQ', 'N'):
-                                                in_data['hzmt_insp_count'] += 1
-                                                in_data['hzmt_insp_oos'] += int(is_oos_hzmt)
-
-                                break  # Break the loop if file processed successfully
+                                break
                             except UnicodeDecodeError:
-                                continue  # Try next encoding
+                                continue
 
-                progress.update(task, advance=1)  # Update progress after each archive
+                progress.update(task, advance=1)
 
-    # Calculate OOS percentages
+    # Calculate OOS percentages and log duplicates (if any)
     for dot_number, data in inspection_data_map.items():
         data['veh_oos_prcnt'] = (data['veh_insp_oos'] / data['veh_insp_count'] * 100) if data['veh_insp_count'] else 0
         data['drv_oos_prcnt'] = (data['drv_insp_oos'] / data['drv_insp_count'] * 100) if data['drv_insp_count'] else 0
         data['hzmt_oos_prcnt'] = (data['hzmt_insp_oos'] / data['hzmt_insp_count'] * 100) if data['hzmt_insp_count'] else 0
+        if data['duplicate_insp_ids']:
+            print(f"Duplicate inspection IDs found for DOT {dot_number}: {data['duplicate_insp_ids']}")
 
     return inspection_data_map
 

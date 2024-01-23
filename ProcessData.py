@@ -137,8 +137,8 @@ def process_csv(file_path):
                     for row in reader:
                         cleaned_row = clean_row(row)
 
-                        # Ensure the row isn't empty after cleaning
-                        if any(cleaned_row.values()):
+                        # Ensure the row isn't empty after cleaning and ICC1 is MC
+                        if any(cleaned_row.values()) and cleaned_row.get('ICC1') == 'MC':
                             # Collect DOT numbers after cleaning and validation
                             if 'DOT_NUMBER' in cleaned_row:
                                 dot_numbers.add(cleaned_row['DOT_NUMBER'])
@@ -286,7 +286,6 @@ def map_dot_to_inspection_data(dot_numbers, archive_directory):
         data['hzmt_oos_prcnt'] = (data['hzmt_insp_oos'] / data['hzmt_insp_count'] * 100) if data['hzmt_insp_count'] else 0
 
     return inspection_data_map
-
 
 def extract_dot_numbers_from_processed(processed_directory):
     dot_numbers = set()

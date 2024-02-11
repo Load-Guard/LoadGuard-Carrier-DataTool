@@ -1,6 +1,6 @@
 
 <p align="center">
-  <img src="https://i.imgur.com/cI1fVZe.png">
+  <img src="https://i.imgur.com/JPbUIcT.png">
 </p>
 
 Place Census and Inspection Archive or Extracted Inspection files in the same directory as the script.

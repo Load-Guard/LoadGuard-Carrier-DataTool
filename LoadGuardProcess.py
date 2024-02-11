@@ -395,10 +395,61 @@ def count_dot_numbers_in_census_files():
 #region ###CARRIER INSPECTION PROCESSING FUNCTIONS###
 
 # Process Inspection Files: Extract, Combine, Filter by Column and Date
+
 def process_inspection_files(directory="."):
     dot_numbers_path = os.path.join(directory, 'Processed Files', 'dot_numbers.txt')
     combined_file_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
-    inspection_ids_path = os.path.join(directory, "Processed Files/Inspections", "inspection_ids.txt")
+    encodings = ['utf-8', 'ISO-8859-1', 'latin1', 'cp1252']
+
+    # Load carrier DOT numbers
+    with open(dot_numbers_path, 'r') as file:
+        carrier_dot_numbers = set(file.read().splitlines())
+
+    all_data_frames = []
+    latest_date = None
+
+    # Process each file
+    for file_path in glob.glob(os.path.join(directory, 'Insp_Pub*.txt')):
+        logging.info(f"Processing file: {file_path}")
+        for encoding in encodings:
+            try:
+                df = pd.read_csv(file_path, delimiter='\t', usecols=insp_columns_to_keep, dtype={'DOT_NUMBER': 'str'}, encoding=encoding)
+                # Convert INSP_DATE to datetime
+                df['INSP_DATE'] = pd.to_datetime(df['INSP_DATE'], format='%Y%m%d', errors='coerce')
+                # Keep rows with valid dates and DOT numbers in the list
+                df = df[df['DOT_NUMBER'].isin(carrier_dot_numbers) & df['INSP_DATE'].notna()]
+                # Update latest inspection date
+                max_date_in_file = df['INSP_DATE'].max()
+                if latest_date is None or max_date_in_file > latest_date:
+                    latest_date = max_date_in_file
+                all_data_frames.append(df)
+                break  # Successfully read with current encoding
+            except UnicodeDecodeError:
+                continue  # Try next encoding if current one fails
+        else:
+            logging.error(f"Failed to process {file_path} with specified encodings.")
+
+    if not all_data_frames:
+        logging.error("No inspection data found. Please check your directory and file names.")
+        return
+
+    # Combine all data frames
+    combined_df = pd.concat(all_data_frames, ignore_index=True)
+
+    # Filter data to the last 24 months
+    if latest_date:
+        cutoff_date = latest_date - relativedelta(months=24)
+        filtered_df = combined_df[combined_df['INSP_DATE'] >= cutoff_date]
+    else:
+        filtered_df = combined_df
+
+    # Save the filtered data
+    filtered_df.to_csv(combined_file_path, index=False, columns=insp_columns_to_keep)
+    logging.info(f"Filtered inspection data saved to {combined_file_path}")
+
+def process_inspection_files_depriciated(directory="."):
+    dot_numbers_path = os.path.join(directory, 'Processed Files', 'dot_numbers.txt')
+    combined_file_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
     dot_inspection_map_path = os.path.join(directory, "Processed Files/Inspections", "dot_inspection_map.csv")
 
     # Ensure the output directory exists
@@ -448,7 +499,7 @@ def process_inspection_files(directory="."):
     # Apply date filter to combined file if needed
     if latest_date:
         cutoff_date = latest_date - relativedelta(months=24)
-        filter_inspection_data_by_date(combined_file_path, cutoff_date, insp_columns_to_keep)
+        filter_inspection_data_by_datebackup(combined_file_path, cutoff_date, insp_columns_to_keep)
 
     # Save INSPECTION_IDs
     with open(inspection_ids_path, 'w') as file:
@@ -464,7 +515,7 @@ def process_inspection_files(directory="."):
             map_writer.writerow([dot_number, ','.join(insp_ids)])
     logging.info("DOT to Inspection ID map saved successfully.")
 
-def filter_inspection_data_by_date(combined_file_path, cutoff_date, insp_columns_to_keep):
+def filter_inspection_data_by_datedepriciated(combined_file_path, cutoff_date, insp_columns_to_keep):
     temp_file_path = combined_file_path + ".tmp"
     with open(combined_file_path, 'r', encoding='utf-8') as infile, open(temp_file_path, 'w', newline='', encoding='utf-8') as outfile:
         reader = csv.DictReader(infile)
@@ -477,53 +528,86 @@ def filter_inspection_data_by_date(combined_file_path, cutoff_date, insp_columns
     os.replace(temp_file_path, combined_file_path)
     logging.info(f"Filtered inspections saved to {combined_file_path}, covering the last 24 months.")
 
-def process_and_combine_insp_unit_files(directory="."):
-    inspection_ids_path = os.path.join(directory, "Processed Files/Inspections", "inspection_ids.txt")
+def process_and_combine_insp_unit_files_backup(directory="."):
+    combined_inspection_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
     combined_insp_units_path = os.path.join(directory, "Processed Files/Inspections", "combined_insp_units.csv")
 
     # Ensure the output directory exists
     os.makedirs(os.path.dirname(combined_insp_units_path), exist_ok=True)
 
-    # Load inspection IDs
-    with open(inspection_ids_path, 'r') as file:
-        inspection_ids = {line.strip() for line in file.readlines()}
-    logging.info(f"Loaded {len(inspection_ids)} inspection IDs for processing.")
+    # Load inspection IDs from the combined inspection file
+    inspection_df = pd.read_csv(combined_inspection_path, usecols=['INSPECTION_ID'], dtype={'INSPECTION_ID': str})
+    inspection_ids = set(inspection_df['INSPECTION_ID'].unique())
+    logging.info(f"Loaded {len(inspection_ids)} unique inspection IDs for processing.")
+
+    # Initialize an empty DataFrame for combining Insp_Unit_Pub files
+    combined_units_df = pd.DataFrame()
 
     files_found = glob.glob(os.path.join(directory, 'Insp_Unit_Pub*.txt'))
     logging.info(f"Found {len(files_found)} Insp_Unit_Pub files to process.")
 
-    rows_processed = 0
-    skipped_rows = 0
-    processed_ids = set()
-
-    writer_initialized = False
+    # Process each Insp_Unit_Pub file
     for file_path in files_found:
         logging.info(f"Processing file: {file_path}")
-        for encoding in ['utf-8', 'ISO-8859-1', 'latin1', 'cp1252']:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f_in:
-                    reader = csv.DictReader(f_in, delimiter='\t')
-                    if not writer_initialized:
-                        with open(combined_insp_units_path, 'w', newline='', encoding='utf-8') as f_out:
-                            writer = csv.DictWriter(f_out, fieldnames=reader.fieldnames)
-                            writer.writeheader()
-                            writer_initialized = True
+        try:
+            unit_df = pd.read_csv(file_path, delimiter='\t', dtype={'INSPECTION_ID': str}, low_memory=False)
+            # Filter rows where INSPECTION_ID is in the list of IDs from the combined inspection file
+            filtered_unit_df = unit_df[unit_df['INSPECTION_ID'].isin(inspection_ids)]
 
-                    for row in reader:
-                        insp_id = row.get("INSPECTION_ID")
-                        if insp_id in inspection_ids and insp_id not in processed_ids:
-                            with open(combined_insp_units_path, 'a', newline='', encoding='utf-8') as f_out:
-                                writer = csv.DictWriter(f_out, fieldnames=reader.fieldnames)
-                                writer.writerow(row)
-                                rows_processed += 1
-                                processed_ids.add(insp_id)
-                        else:
-                            skipped_rows += 1
-                break  # Break after successful processing with a given encoding
-            except UnicodeDecodeError:
-                continue  # Try next encoding if current one fails
+            # Combine filtered data
+            combined_units_df = pd.concat([combined_units_df, filtered_unit_df], ignore_index=True)
 
-    logging.info(f"Processed {rows_processed} rows from Insp_Unit_Pub files into {combined_insp_units_path}. Skipped {skipped_rows} rows due to unmatched INSPECTION_ID.")
+        except Exception as e:
+            logging.error(f"Error processing file {file_path}: {e}")
+            continue
+
+    # Save the combined and filtered Insp_Unit_Pub data to CSV
+    combined_units_df.to_csv(combined_insp_units_path, index=False)
+    logging.info(f"Combined Insp_Unit_Pub data saved to {combined_insp_units_path}.")
+
+def process_and_combine_insp_unit_files(directory="."):
+    combined_inspection_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
+    combined_insp_units_path = os.path.join(directory, "Processed Files/Inspections", "combined_insp_units.csv")
+    encodings = ['utf-8', 'ISO-8859-1', 'latin1', 'cp1252']  # List of encodings to try
+
+    # Ensure the output directory exists
+    os.makedirs(os.path.dirname(combined_insp_units_path), exist_ok=True)
+
+    # Load inspection IDs from the combined inspection file
+    inspection_df = pd.read_csv(combined_inspection_path, usecols=['INSPECTION_ID'], dtype={'INSPECTION_ID': 'str'})
+    inspection_ids = set(inspection_df['INSPECTION_ID'].unique())
+    logging.info(f"Loaded {len(inspection_ids)} unique inspection IDs for processing.")
+
+    files_found = glob.glob(os.path.join(directory, 'Insp_Unit_Pub*.txt'))
+    logging.info(f"Found {len(files_found)} Insp_Unit_Pub files to process.")
+
+    # Initialize writer only once and write header
+    with open(combined_insp_units_path, 'w', newline='', encoding='utf-8') as f_out:
+        writer = None
+
+        # Process each Insp_Unit_Pub file
+        for file_path in files_found:
+            logging.info(f"Processing file: {file_path}")
+            for encoding in encodings:
+                try:
+                    unit_df = pd.read_csv(file_path, delimiter='\t', dtype={'INSPECTION_ID': 'str'}, encoding=encoding, low_memory=False)
+                    # Filter rows where INSPECTION_ID is in the list of IDs from the combined inspection file
+                    filtered_unit_df = unit_df[unit_df['INSPECTION_ID'].isin(inspection_ids)]
+                    
+                    if writer is None:
+                        writer = csv.DictWriter(f_out, fieldnames=filtered_unit_df.columns)
+                        writer.writeheader()
+                    
+                    filtered_unit_df.to_csv(f_out, header=False, index=False)
+                    logging.debug(f"Successfully processed {file_path} with encoding: {encoding}")
+                    break  # Success, move to the next file
+                except UnicodeDecodeError:
+                    continue  # Try next encoding
+                except Exception as e:
+                    logging.error(f"Error processing file {file_path} with encoding {encoding}: {e}")
+                    break  # Move to the next file if other errors occur
+
+    logging.info(f"Combined Insp_Unit_Pub data saved to {combined_insp_units_path}.")
 
 #endregion
 
@@ -565,9 +649,11 @@ def enhance_census_with_inspection_data():
         in_data['insp_ids'].add(row['INSPECTION_ID'])
 
         inspection_level = row['INSP_LEVEL_ID']
-        is_oos_veh = row['VEHICLE_OOS_TOTAL']
-        is_oos_drv = row['DRIVER_OOS_TOTAL']
-        is_oos_hzmt = row['HAZMAT_OOS_TOTAL'] if 'HAZMAT_OOS_TOTAL' in row else 0
+        
+        # Increment if values are greater than 0
+        is_oos_veh = 1 if row['VEHICLE_OOS_TOTAL'] > 0 else 0
+        is_oos_drv = 1 if row['DRIVER_OOS_TOTAL'] > 0 else 0
+        is_oos_hzmt = 1 if row.get('HAZMAT_OOS_TOTAL', 0) > 0 else 0
 
         if inspection_level in ['1', '2', '5', '6']:
             in_data['veh_insp_count'] += 1
@@ -779,7 +865,7 @@ def main():
 
     # Step 8: Split processed Census Files.
     if 'Step 8: Split Processed Census Files' in answers['operations']:
-            input_file_path = 'Processed Files/combined_census.csv'
+            input_file_path = 'Processed Files/combined_census_enhanced.csv'
             output_directory = 'Processed Files/Split Data/Census'
             split_files(input_file_path, output_directory)
 
@@ -855,28 +941,28 @@ def main():
         description = "Uploading files"
         upload_files_to_ftp(input_dir, target_upload_dir, description)
 
-    # Initiate Carrier Data Merge
+    # Step 20: Initiate Census MySQL Merge
     if 'Step 20: Initiate Census MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/census_merge.php")
 
-    # Initiate Inspections Data Merge
-    if 'Step 21: Initiate Inspections Data Merge with Database' in answers['operations']:
+    # Step 21: Initiate Inspections MySQL Merge
+    if 'Step 21: Initiate Inspections MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/insp_merge.php")
 
-    # Initiate Insp_Unit Data Merge
-    if 'Step 22: Initiate Inspections Data Merge with Database' in answers['operations']:
+    # Step 22: Initiate Insp_Unit MySQL Merge
+    if 'Step 22: Initiate Insp_Unit MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/insp_unit_merge.php")
 
-    # Initiate Inspections Data Merge
-    if 'Step 23: Initiate Inspections Data Merge with Database' in answers['operations']:
+    # Step 23: Initiate DOT-VIN Files MySQL Merge
+    if 'Step 23: Initiate DOT-VIN Files MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/dot_vin_merge.php")
 
-    # Initiate Inspections Data Merge
-    if 'Step 24: Initiate Inspections Data Merge with Database' in answers['operations']:
+    # Step 24: Initiate VIN-DOT Files MySQL Merge
+    if 'Step 24: Initiate VIN-DOT Files MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/vin_dot_merge.php")
 
-    # Initiate Inspections Data Merge
-    if 'Step 25: Initiate Inspections Data Merge with Database' in answers['operations']:
+    # Step 25: Initiate VIN-DOT Matched MySQL Merge
+    if 'Step 25: Initiate VIN-DOT Matched MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/vin_matched_merge.php")
 
     # Restart Operation

@@ -13,7 +13,6 @@ import requests
 import inquirer
 from csv import writer
 from ftplib import FTP, error_perm
-import modin.pandas as pd
 from rich.console import Console
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -140,12 +139,15 @@ def main_menu():
                 'Step 17: Upload DOT-VIN Files To FTP',
                 'Step 18: Upload VIN-DOT Files To FTP',
                 'Step 19: Upload VIN-DOT Matched Files to FTP',
-                'Step 20: Initiate Census MySQL Merge',
-                'Step 21: Initiate Inspections MySQL Merge',
-                'Step 22: Initiate Insp_Unit MySQL Merge',
+                'Step 21: Initiate Census MySQL Merge',
+                'Step 22: Initiate Inspections MySQL Merge',
+                'Step 23: Initiate Insp_Unit MySQL Merge',
                 'Step 23: Initiate DOT-VIN Files MySQL Merge',
-                'Step 24: Initiate VIN-DOT Files MySQL Merge',
-                'Step 25: Initiate VIN-DOT Matched MySQL Merge',
+                'Step 25: Initiate VIN-DOT Files MySQL Merge',
+                'Step 26: Initiate VIN-DOT Matched MySQL Merge',
+                'Step 27: Initiate Auth Hist MySQL Merge',
+                'Step 28: Initiate Insp Counts MySQL Merge',
+                'Step 29: Analize Insurance Data',
                 'Restart the Script',
                 'Exit'
             ],
@@ -233,9 +235,16 @@ def clean_row(row):
     """Remove hidden characters and strip whitespace."""
     return {k: v.replace('\n', '').replace('\r', '').strip() for k, v in row.items()}
 
+
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+}
+
+
 # Call Carrier MySQL data merger.
 def call_data_merger(url):
     startIndex = 0
+    response = requests.get(f"{url}?start={startIndex}", headers=headers)
     totalFiles = None
     completed = False
 
@@ -447,7 +456,6 @@ def process_inspection_files(directory="."):
     filtered_df.to_csv(combined_file_path, index=False, columns=insp_columns_to_keep)
     logging.info(f"Filtered inspection data saved to {combined_file_path}")
 
-def process_inspection_files_depriciated(directory="."):
     dot_numbers_path = os.path.join(directory, 'Processed Files', 'dot_numbers.txt')
     combined_file_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
     dot_inspection_map_path = os.path.join(directory, "Processed Files/Inspections", "dot_inspection_map.csv")
@@ -496,26 +504,6 @@ def process_inspection_files_depriciated(directory="."):
 
     logging.info(f"Processed {rows_processed} rows from {len(files_found)} files. Skipped {skipped_rows_due_to_date} rows due to missing INSP_DATE.")
 
-    # Apply date filter to combined file if needed
-    if latest_date:
-        cutoff_date = latest_date - relativedelta(months=24)
-        filter_inspection_data_by_datebackup(combined_file_path, cutoff_date, insp_columns_to_keep)
-
-    # Save INSPECTION_IDs
-    with open(inspection_ids_path, 'w') as file:
-        for insp_id in sorted(inspection_ids):
-            file.write(f"{insp_id}\n")
-    logging.info(f"INSPECTION_IDs saved to {inspection_ids_path}.")
-
-    # Save the DOT to inspection map
-    with open(dot_inspection_map_path, 'w', newline='', encoding='utf-8') as map_file:
-        map_writer = csv.writer(map_file)
-        map_writer.writerow(['DOT_NUMBER', 'INSPECTION_IDS'])
-        for dot_number, insp_ids in dot_inspection_map.items():
-            map_writer.writerow([dot_number, ','.join(insp_ids)])
-    logging.info("DOT to Inspection ID map saved successfully.")
-
-def filter_inspection_data_by_datedepriciated(combined_file_path, cutoff_date, insp_columns_to_keep):
     temp_file_path = combined_file_path + ".tmp"
     with open(combined_file_path, 'r', encoding='utf-8') as infile, open(temp_file_path, 'w', newline='', encoding='utf-8') as outfile:
         reader = csv.DictReader(infile)
@@ -528,7 +516,6 @@ def filter_inspection_data_by_datedepriciated(combined_file_path, cutoff_date, i
     os.replace(temp_file_path, combined_file_path)
     logging.info(f"Filtered inspections saved to {combined_file_path}, covering the last 24 months.")
 
-def process_and_combine_insp_unit_files_backup(directory="."):
     combined_inspection_path = os.path.join(directory, "Processed Files/Inspections", "combined_filtered_inspections.csv")
     combined_insp_units_path = os.path.join(directory, "Processed Files/Inspections", "combined_insp_units.csv")
 
@@ -823,7 +810,84 @@ def vin_to_dot_matchonly(directory):
 
 #endregion
 
+#region ###CARRIER INSURANCE PROCESSING FUNCTIONS###
 
+def process_and_analyze_insurance_data_backup(directory):
+    def read_and_normalize(file_path, lowercase_columns=False):
+        try:
+            df = pd.read_csv(file_path, delimiter='~', encoding='ISO-8859-1', low_memory=False)
+            if lowercase_columns:
+                df.columns = df.columns.str.upper()
+            return df
+        except FileNotFoundError:
+            print(f"File not found: {file_path}")
+            return pd.DataFrame()
+
+    # Load data
+    active_df = read_and_normalize(os.path.join(directory, 'Raw Data/Insurance Data/CENSUS_INS_ACTIVE_HDR_FOIA_20240109.txt'))
+    pend_df = read_and_normalize(os.path.join(directory, 'Raw Data/Insurance Data/CENSUS_INS_PEND_HDR_FOIA_20240109.txt'))
+    revoc_df = read_and_normalize(os.path.join(directory, 'Raw Data/Insurance Data/CENSUS_INS_REVOCATION_NOAUTH_HDR_FOIA_20240109.txt'), True)
+    hist_dfs = [read_and_normalize(f) for f in glob.glob(os.path.join(directory, 'Raw Data/Insurance Data/CENSUS_INS_HIST_HDR_FOIA_*.txt'))]
+    hist_df = pd.concat(hist_dfs, ignore_index=True) if hist_dfs else pd.DataFrame()
+
+    # Combine all dataframes and handle duplicates
+    combined_df = pd.concat([active_df, pend_df, hist_df], ignore_index=True).drop_duplicates(subset=['DOT_NUMBER'], keep='last')
+    
+    # Correctly calculate 'COVERAGE_SUFFICIENT', 'FREQUENCY_OF_APPLICATIONS', and 'HISTORICAL_LAPSES'
+    combined_df['COVERAGE_SUFFICIENT'] = combined_df['MAX_COV_AMOUNTX1K'].astype(float).apply(lambda x: 'Yes' if x >= 750 else 'No')
+    combined_df['FREQUENCY_OF_APPLICATIONS'] = combined_df['POLICY_NO'].notnull().astype(int)
+    combined_df['HISTORICAL_LAPSES'] = 0  # Placeholder, adjust based on your data
+    
+    # Merge with revocation reasons and update ACTIVE status based on presence in active_df
+    active_dot_numbers = active_df['DOT_NUMBER'].unique()
+    combined_df['ACTIVE'] = combined_df['DOT_NUMBER'].apply(lambda x: 'Yes' if x in active_dot_numbers else 'No')
+    combined_df = combined_df.merge(revoc_df[['DOT_NUMBER', 'REASON']], on='DOT_NUMBER', how='left')
+
+    # Adjust authority classification logic
+    def classify_authority(row):
+        if row['ACTIVE'] == 'Yes' and pd.isna(row['REASON']):
+            return 'High'
+        elif row['ACTIVE'] == 'Yes' and row['REASON'] == 'INVOLUNTARY REVOCATION':
+            return 'Medium'
+        return 'Low'
+
+    combined_df['AUTHORITY_CLASSIFICATION'] = combined_df.apply(classify_authority, axis=1)
+
+    # Select the most recent record for each DOT_NUMBER
+    combined_df['EFFECTIVE_DATE'] = pd.to_datetime(combined_df['EFFECTIVE_DATE'], errors='coerce')
+    latest_df = combined_df.sort_values('EFFECTIVE_DATE', ascending=False).drop_duplicates('DOT_NUMBER')
+
+    # Prepare the final DataFrame
+    output_columns = ['DOT_NUMBER', 'LEGAL_NAME', 'ACTIVE', 'COVERAGE_SUFFICIENT', 'FREQUENCY_OF_APPLICATIONS', 'HISTORICAL_LAPSES', 'REASON', 'AUTHORITY_CLASSIFICATION']
+    final_df = latest_df[output_columns]
+
+    # Save to CSV
+    final_path = os.path.join(directory, 'final_insurance_analysis.csv')
+    final_df.to_csv(final_path, index=False)
+    print("Data analysis completed and saved to:", final_path)
+
+
+
+
+
+    dtypes = {
+        'MAIL_COLONIA': 'object',
+        'RFC_NUMBER': 'object',
+        'ZIP_CODE': 'object',
+        'MAIL_FAX': 'object',
+        'MAIL_TELNO': 'object',
+        'INS_FORM_CODE': 'object',
+        'MAX_COV_AMOUNTX1K': 'object',
+        'BUS_ZIP_CODE': 'object',
+        'UNDERL_LIM_AMOUNT': 'float64',
+        'MAIL_ZIP_CODE': 'object',
+        'TELE_NUM': 'float64',
+        'DBA_NAME': 'object',
+        'BUS_FAX': 'object'
+        
+    }
+
+# endregion
 
 # Main Function.
 def main():
@@ -942,7 +1006,7 @@ def main():
         upload_files_to_ftp(input_dir, target_upload_dir, description)
 
     # Step 20: Initiate Census MySQL Merge
-    if 'Step 20: Initiate Census MySQL Merge' in answers['operations']:
+    if 'Step 21: Initiate Census MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/census_merge.php")
 
     # Step 21: Initiate Inspections MySQL Merge
@@ -962,8 +1026,20 @@ def main():
         call_data_merger("https://loadguard.ai/ld/mergefuncs/vin_dot_merge.php")
 
     # Step 25: Initiate VIN-DOT Matched MySQL Merge
-    if 'Step 25: Initiate VIN-DOT Matched MySQL Merge' in answers['operations']:
+    if 'Step 26: Initiate VIN-DOT Matched MySQL Merge' in answers['operations']:
         call_data_merger("https://loadguard.ai/ld/mergefuncs/vin_matched_merge.php")
+
+    # Step 26: Initiate Auth Hist MySQL Merge
+    if 'Step 27: Initiate Auth Hist MySQL Merge' in answers['operations']:
+        call_data_merger("https://loadguard.ai/ld/mergefuncs/auth_hist_all.php")
+
+    # Step 27: Initiate Insp Counts MySQL Merge
+    if 'Step 28: Initiate Insp Counts MySQL Merge' in answers['operations']:
+        call_data_merger("https://loadguard.ai/ld/mergefuncs/insp_counts.php")
+
+    # Step 28: Analyze Insurance Data
+    if 'Step 29: Analize Insurance Data' in answers['operations']:
+        process_and_analyze_insurance_data_backup(directory)
 
     # Restart Operation
     if 'Restart the Script' in answers['operations']:
